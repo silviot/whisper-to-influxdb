@@ -7,6 +7,7 @@ import (
 	"github.com/kisielk/whisper-go/whisper"
 	"github.com/rcrowley/go-metrics"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -305,15 +306,15 @@ func main() {
 	fromTime = uint32(from)
 	untilTime = uint32(until)
 
-	cfg := &client.ClientConfig{
-		Host:     fmt.Sprintf("%s:%d", influxHost, influxPort),
+	server_url, url_err := url.Parse(fmt.Sprintf("http://%s:%d/%s", influxHost, influxPort, influxDb))
+	cfg := &client.Config{
+		URL:     *server_url,
 		Username: influxUser,
 		Password: influxPass,
-		Database: influxDb,
 	}
 
 	var err error
-	influxClient, err = client.NewClient(cfg)
+	influxClient, err = client.NewClient(*cfg)
 	if err != nil {
 		log.Fatal(err)
 	}
