@@ -46,8 +46,12 @@ var skipWhisperErrors bool
 var statsInterval uint
 var exit chan int
 
-func seriesString(s *client.Series) string {
-	return fmt.Sprintf("InfluxDB series '%s' (%d points)", s.Name, len(s.Points))
+func seriesString(s *client.BatchPoints) string {
+	name := ""
+	if len(s.Points) > 0 {
+		name = s.Points[0].Name
+	}
+	return fmt.Sprintf("InfluxDB series '%s' (%d points)", name, len(s.Points))
 }
 
 // needed to keep track of what's the next file in line that needs processing
@@ -107,30 +111,31 @@ func keepOrder() {
 
 func influxWorker() {
 	for abstractSerie := range influxSeries {
-		influxPoints := make([][]interface{}, len(abstractSerie.Points), len(abstractSerie.Points))
-		// TODO: if there are no points, we can just break out
-		for i, abstractPoint := range abstractSerie.Points {
-			influxPoint := make([]interface{}, 3, 3)
-			influxPoint[0] = abstractPoint.Timestamp
-			influxPoint[1] = 1
-			influxPoint[2] = abstractPoint.Value
-
-			influxPoints[i] = influxPoint
-		}
+		influxPoints := make([]client.Point, len(abstractSerie.Points))
 		basename := strings.TrimSuffix(abstractSerie.Path[len(whisperDir)+1:], ".wsp")
 		name := strings.Replace(basename, "/", ".", -1)
-		influxSerie := client.Series{
-			Name:    influxPrefix + name,
-			Columns: []string{"time", "sequence_number", "value"},
+		// TODO: if there are no points, we can just break out
+		for i, abstractPoint := range abstractSerie.Points {
+			influxPoints[i] = client.Point{
+				Name: name,
+				Fields: map[string]interface{}{
+					"value": abstractPoint.Value,
+				},
+				Time: time.Unix(int64(abstractPoint.Timestamp), 0),
+			}
+		}
+		influxBatchPoints := client.BatchPoints{
+			RetentionPolicy: "default",
 			Points:  influxPoints,
+			Database: influxDb,
+			Precision: "s",
 		}
 		pre := time.Now()
-		toCommit := []*client.Series{&influxSerie}
 		for {
-			err := influxClient.WriteSeriesWithTimePrecision(toCommit, client.Second)
+			_, err := influxClient.Write(influxBatchPoints)
 			duration := time.Since(pre)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Failed to write %s: %s (operation took %v)\n", seriesString(&influxSerie), err.Error(), duration)
+				fmt.Fprintf(os.Stderr, "Failed to write %s: %s (operation took %v)\n", seriesString(&influxBatchPoints), err.Error(), duration)
 				if skipInfluxErrors {
 					time.Sleep(time.Duration(5) * time.Second) // give InfluxDB to recover
 					continue
@@ -140,7 +145,7 @@ func influxWorker() {
 				}
 			}
 			if verbose {
-				fmt.Println("committed", seriesString(&influxSerie))
+				fmt.Println("committed", seriesString(&influxBatchPoints))
 			}
 			influxWriteTimer.Update(duration)
 			finishedFiles <- abstractSerie.Path
@@ -306,7 +311,11 @@ func main() {
 	fromTime = uint32(from)
 	untilTime = uint32(until)
 
-	server_url, url_err := url.Parse(fmt.Sprintf("http://%s:%d/%s", influxHost, influxPort, influxDb))
+	server_url, url_err := url.Parse(fmt.Sprintf("http://%s:%d", influxHost, influxPort))
+	if url_err != nil {
+		log.Fatal(url_err)
+	}
+
 	cfg := &client.Config{
 		URL:     *server_url,
 		Username: influxUser,
