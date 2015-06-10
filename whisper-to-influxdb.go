@@ -49,7 +49,7 @@ var exit chan int
 func seriesString(s *client.BatchPoints) string {
 	name := ""
 	if len(s.Points) > 0 {
-		name = s.Points[0].Name
+		name = s.Points[0].Measurement
 	}
 	return fmt.Sprintf("InfluxDB series '%s' (%d points)", name, len(s.Points))
 }
@@ -117,7 +117,7 @@ func influxWorker() {
 		// TODO: if there are no points, we can just break out
 		for i, abstractPoint := range abstractSerie.Points {
 			influxPoints[i] = client.Point{
-				Name: name,
+				Measurement: name,
 				Fields: map[string]interface{}{
 					"value": abstractPoint.Value,
 				},
